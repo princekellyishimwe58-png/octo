@@ -1,0 +1,148 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* ------------------------------------------------------------------
+   Octo design tokens
+   One brand colour (calm teal-green), neutral greys, one alert accent.
+   Light mode is the default; dark mode is opt-in via the `dark` class.
+------------------------------------------------------------------ */
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* Page + surfaces */
+  --background: #f6f8f7;
+  --foreground: #10201b;
+  --card: #ffffff;
+  --card-foreground: #10201b;
+
+  /* Muted text: 6.3:1 on white so it stays readable in sunlight */
+  --muted: #eef2f0;
+  --muted-foreground: #55655f;
+
+  /* Brand: deep teal-green, white text passes AA (5.4:1) */
+  --primary: #0d7a63;
+  --primary-foreground: #ffffff;
+  --primary-soft: #e4f3ed;
+
+  /* Accent used only for alerts / things needing the owner */
+  --accent: #b45309;
+  --accent-foreground: #ffffff;
+  --accent-soft: #fdf0dd;
+
+  --success: #0d7a63;
+  --success-soft: #e4f3ed;
+
+  --border: #e2e8e5;
+  --input: #d7dfdb;
+  --ring: #0d7a63;
+
+  --radius: 1rem;
+}
+
+.dark {
+  --background: #0b1512;
+  --foreground: #ecf3f0;
+  --card: #121f1a;
+  --card-foreground: #ecf3f0;
+
+  --muted: #1a2a24;
+  --muted-foreground: #a7b8b1;
+
+  --primary: #34b394;
+  --primary-foreground: #06231c;
+  --primary-soft: #15362c;
+
+  --accent: #f0a959;
+  --accent-foreground: #2a1705;
+  --accent-soft: #3a2a14;
+
+  --success: #34b394;
+  --success-soft: #15362c;
+
+  --border: #24352e;
+  --input: #2d4138;
+  --ring: #34b394;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-soft: var(--accent-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 0.35rem);
+  --radius-sm: calc(var(--radius) - 0.6rem);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  --shadow-soft: 0 1px 2px rgb(16 32 27 / 0.04), 0 8px 24px -12px rgb(16 32 27 / 0.12);
+  --shadow-lift: 0 2px 4px rgb(16 32 27 / 0.05), 0 18px 40px -20px rgb(16 32 27 / 0.22);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    /* 16px minimum body text — readable outdoors on a phone */
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Bigger, clearer focus rings for keyboard + accessibility */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--primary-soft);
+    color: var(--foreground);
+  }
+}
+
+@layer utilities {
+  /* WhatsApp-style chat background */
+  .chat-canvas {
+    background-color: color-mix(in oklab, var(--muted) 70%, var(--background));
+    background-image: radial-gradient(color-mix(in oklab, var(--foreground) 6%, transparent) 1px, transparent 1px);
+    background-size: 18px 18px;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+
+  .safe-bottom {
+    padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);
+  }
+}
