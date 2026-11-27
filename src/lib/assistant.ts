@@ -276,6 +276,158 @@ QUESTIONS AND ANSWERS
 ${faqs || "- None listed yet"}`;
 }
 
+/* ------------------------------------------------------------------ LLM ---
+ *
+ * Two ways to get real model-written replies:
+ *
+ *  1. n8n / custom proxy — set LLM_API_URL or N8N_WEBHOOK_URL. We POST a
+ *     stable body { system, message, history, provider, model } and expect
+ *     { reply, confident?, booking? } back.
+ *  2. A provider key — set LLM_API_KEY and LLM_PROVIDER (openai | groq |
+ *     gemini | openrouter | deepseek). We call that provider's
+ *     OpenAI-compatible chat endpoint directly, no n8n needed.
+ *
+ * With neither, the local grounded engine answers, so nothing ever breaks.
+ */
+
+const PROVIDERS = {
+  openai: {
+    url: "https://api.openai.com/v1/chat/completions",
+    model: "gpt-4o-mini",
+    jsonMode: true,
+  },
+  groq: {
+    url: "https://api.groq.com/openai/v1/chat/completions",
+    model: "llama-3.3-70b-versatile",
+    jsonMode: true,
+  },
+  gemini: {
+    url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    model: "gemini-2.0-flash",
+    jsonMode: true,
+  },
+  openrouter: {
+    url: "https://openrouter.ai/api/v1/chat/completions",
+    model: "openai/gpt-4o-mini",
+    jsonMode: true,
+  },
+  deepseek: {
+    url: "https://api.deepseek.com/chat/completions",
+    model: "deepseek-chat",
+    jsonMode: true,
+  },
+} as const;
+
+type ProviderName = keyof typeof PROVIDERS;
+
+const JSON_CONTRACT = `
+
+Answer with a single JSON object and nothing else:
+{
+  "reply": "the WhatsApp message to send",
+  "confident": true or false,
+  "booking": { "service": "exact service name", "starts_at": "ISO date-time" } or null
+}
+Set confident to false (and ask a person to follow up) whenever the answer is
+not in the information above. Only include booking when the customer has named
+a service we offer and a specific day and time.`;
+
+/** Pull a JSON object out of a model answer that may be fenced or chatty. */
+function readJson(raw: string): {
+  reply?: string;
+  body?: string;
+  confident?: boolean;
+  escalate?: boolean;
+  booking?: { service?: string; starts_at?: string } | null;
+} | null {
+  const text = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end <= start) return null;
+  try {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+function toAnswer(data: ReturnType<typeof readJson>): AssistantAnswer | null {
+  if (!data) return null;
+  const body = (data.reply ?? data.body ?? "").toString().trim().slice(0, 900);
+  if (!body) return null;
+
+  const booking =
+    data.booking?.service && data.booking?.starts_at
+      ? { service: data.booking.service, starts_at: data.booking.starts_at }
+      : undefined;
+
+  return {
+    body,
+    confident: data.escalate ? false : (data.confident ?? true),
+    booking,
+  };
+}
+
+/** Ask the provider named by LLM_PROVIDER directly. Never throws. */
+async function askProvider(
+  message: string,
+  ctx: AssistantContext,
+  history: { role: "customer" | "assistant"; content: string }[],
+): Promise<AssistantAnswer | null> {
+  const key = process.env.LLM_API_KEY;
+  const name = (process.env.LLM_PROVIDER ?? "openai").toLowerCase() as ProviderName;
+  if (!key) return null;
+
+  const provider = PROVIDERS[name];
+  if (!provider) {
+    console.error("Unknown LLM_PROVIDER:", name);
+    return null;
+  }
+
+  try {
+    const response = await fetch(provider.url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: process.env.LLM_MODEL ?? provider.model,
+        temperature: 0.3,
+        max_tokens: 400,
+        ...(provider.jsonMode ? { response_format: { type: "json_object" } } : {}),
+        messages: [
+          { role: "system", content: buildSystemPrompt(ctx) + JSON_CONTRACT },
+          ...history.map((turn) => ({
+            role: turn.role === "customer" ? "user" : "assistant",
+            content: turn.content,
+          })),
+          { role: "user", content: message },
+        ],
+      }),
+      signal: AbortSignal.timeout(12_000),
+    });
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      console.error("LLM request failed", response.status, detail.slice(0, 300));
+      return null;
+    }
+
+    const payload = (await response.json()) as {
+      choices?: { message?: { content?: string } }[];
+    };
+    const raw = payload.choices?.[0]?.message?.content ?? "";
+    if (!raw) return null;
+
+    // A plain-text answer is still a usable reply; a JSON one carries more.
+    return toAnswer(readJson(raw)) ?? { body: raw.trim().slice(0, 900), confident: true };
+  } catch (error) {
+    console.error("LLM request error", error);
+    return null;
+  }
+}
+
 /** Ask the configured LLM (through n8n or a provider) for a reply. */
 export async function askConfiguredModel(
   message: string,
@@ -283,7 +435,7 @@ export async function askConfiguredModel(
   history: { role: "customer" | "assistant"; content: string }[] = [],
 ): Promise<AssistantAnswer | null> {
   const url = process.env.LLM_API_URL ?? process.env.N8N_WEBHOOK_URL;
-  if (!url) return null;
+  if (!url) return askProvider(message, ctx, history);
 
   try {
     const response = await fetch(url, {
@@ -306,28 +458,9 @@ export async function askConfiguredModel(
     });
 
     if (!response.ok) return null;
-    const data = (await response.json()) as {
-      reply?: string;
-      body?: string;
-      confident?: boolean;
-      escalate?: boolean;
-      booking?: { service?: string; starts_at?: string };
-    };
-    const body = data.reply ?? data.body;
-    if (!body) return null;
-
-    // Only accept a booking when both fields are present; the webhook checks
-    // the service really exists and the time is in the future.
-    const booking =
-      data.booking?.service && data.booking?.starts_at
-        ? { service: data.booking.service, starts_at: data.booking.starts_at }
-        : undefined;
-
-    return {
-      body,
-      confident: data.escalate ? false : (data.confident ?? true),
-      booking,
-    };
+    // Only a booking with both fields is accepted; the webhook checks the
+    // service really exists and the time is in the future.
+    return toAnswer((await response.json()) as Parameters<typeof toAnswer>[0]);
   } catch {
     // Network/provider issues must never leave a customer without a reply.
     return null;

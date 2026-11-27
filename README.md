@@ -92,9 +92,13 @@ the browser otherwise. Screens never know the difference.
    `https://your-domain/api/whatsapp/webhook` with your `WHATSAPP_VERIFY_TOKEN`,
    subscribe to `messages`, and put the phone number id + access token in `.env.local`.
 
-4. **LLM** — set `N8N_WEBHOOK_URL` (n8n must accept `{ message, context }` and return
-   `{ reply, confident }`), or set `LLM_API_KEY` + `LLM_API_URL` for a direct
-   OpenAI-compatible call. If neither answers, the grounded local engine replies.
+4. **LLM** — either set `N8N_WEBHOOK_URL` / `LLM_API_URL` (a proxy that accepts
+   `{ system, message, history, provider, model }` and returns `{ reply, confident, booking? }`),
+   or just set `LLM_API_KEY` plus `LLM_PROVIDER` (`openai`, `groq`, `gemini`,
+   `openrouter` or `deepseek`) and optionally `LLM_MODEL` — Octo then calls that
+   provider's OpenAI-compatible chat endpoint directly, asking for
+   `{ reply, confident, booking }` JSON. If the provider is slow, down or unset,
+   the grounded local engine answers instead, so a customer is never ignored.
 
 5. **Vercel** — push the repo, add the same variables, and deploy. `vercel.json`
    already schedules the daily reminder job (protect it with `CRON_SECRET`).
